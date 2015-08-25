@@ -114,8 +114,8 @@ func (p *Proxy) Listen() (*net.TCPListener, error) {
 func (p *Proxy) Handle(inCon *net.TCPConn) {
     const buffer = 32
     defer func() {
-        p.Counter--
         inCon.Close()
+        p.Counter--
     }()
     outCon, err := p.Dial()
     if err != nil {

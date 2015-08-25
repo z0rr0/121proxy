@@ -1,6 +1,12 @@
 # 121proxy
 
-One to one TCP proxy
+One to one TCP proxy.
+
+It is a simple TCP proxy server. It forwards data from remote its client to another server without any modifications. Each connection client->proxy is mapped to according one proxy->server
+
+```
+client <-> proxy <-> server
+```
 
 ---
 
