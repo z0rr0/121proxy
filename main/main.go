@@ -64,7 +64,13 @@ func main() {
         for {
             inConn, err := ln.AcceptTCP()
             if err != nil {
-                p.PrintErr("can't accept incoming connection: %v\n", err)
+                p.LogError.Printf("can't accept incoming connection: %v\n", err)
+                continue
+            }
+            p.Counter++
+            if p.LimitReached() {
+                p.LogError.Printf("can't accept incoming connection from %v: workers' limit is reached (%v)\n", inConn.RemoteAddr(), p.Counter)
+                inConn.Close()
                 continue
             }
             go p.Handle(inConn)
