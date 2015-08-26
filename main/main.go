@@ -3,7 +3,6 @@
 // license that can be found in the LICENSE file.
 
 // Package main is a simple TCP proxy server.
-
 package main
 
 import (

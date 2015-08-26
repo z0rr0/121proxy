@@ -3,9 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package proxy implements a simple TCP proxy server.
-//
 // It forwards incoming TCP requests to remote servers without any data changes.
-
 package proxy
 
 import (
