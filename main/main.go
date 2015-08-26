@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package main is a simple TCP proxy server.
+
 package main
 
 import (
@@ -18,13 +20,17 @@ const (
     // Config is a default configuration file name
     Config = "config.conf"
     // Name is a program name
-    Name    = "121proxy"
+    Name = "121proxy"
+    // Comment is a general program comment
     Comment = " It is a simple TCP proxy server.\n It forwards incoming TCP requests to remote server without any data changes."
 )
 
 var (
-    Version   = "v0.0"
-    Revision  = "git:000000"
+    // Version is a program version
+    Version = "v0.0"
+    // Revision is CVS GIT version
+    Revision = "git:000000"
+    // BuildDate is date of build
     BuildDate = "1900-00-00_00:00:00UTC"
 )
 
