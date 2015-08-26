@@ -63,25 +63,7 @@ func main() {
         panic(err)
     }
     go func() {
-        ln, err := p.Listen()
-        if err != nil {
-            errc <- err
-            return
-        }
-        for {
-            inConn, err := ln.AcceptTCP()
-            if err != nil {
-                p.LogError.Printf("can't accept incoming connection: %v\n", err)
-                continue
-            }
-            p.Counter++
-            if p.LimitReached() {
-                p.LogError.Printf("can't accept incoming connection from %v: workers' limit is reached (%v)\n", inConn.RemoteAddr(), p.Counter)
-                inConn.Close()
-                continue
-            }
-            go p.Handle(inConn)
-        }
+        errc <- p.Start()
     }()
     fmt.Printf("termination, reason: %v\n", <-errc)
 }

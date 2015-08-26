@@ -34,7 +34,7 @@ type Proxy struct {
     mutex    sync.Mutex
     LogDebug *log.Logger
     LogError *log.Logger
-    Counter  uint
+    counter  uint
 }
 
 // getServer returns a current remote network address.
@@ -139,11 +139,11 @@ func (p *Proxy) Listen() (*net.TCPListener, error) {
 }
 
 // Handle handles new incomming connection
-func (p *Proxy) Handle(inCon *net.TCPConn) {
+func (p *Proxy) Handle(inCon *net.TCPConn, snum uint) {
     const buffer = 32
     defer func() {
         inCon.Close()
-        p.Counter--
+        p.counter--
     }()
     outCon, err := p.Dial(p.getServer())
     if err != nil {
@@ -153,7 +153,7 @@ func (p *Proxy) Handle(inCon *net.TCPConn) {
     defer outCon.Close()
     end := make(chan bool)
     fromServer, fromClient := make([]byte, buffer), make([]byte, buffer)
-    p.LogDebug.Printf("session: %v-%v <-> %v-%v\n",
+    p.LogDebug.Printf("session [%v]: %v-%v <-> %v-%v\n", snum,
         inCon.LocalAddr(), inCon.RemoteAddr(),
         outCon.LocalAddr(), outCon.RemoteAddr())
     // client (incCon) <- proxy <- server (outCon)
@@ -164,12 +164,12 @@ func (p *Proxy) Handle(inCon *net.TCPConn) {
         for {
             n, err := outCon.Read(fromServer)
             if err != nil {
-                p.LogError.Printf("can't read server's data: %v", err)
+                p.LogDebug.Printf("can't read server's data: %v", err)
                 return
             }
             n, err = inCon.Write(fromServer[:n])
             if err != nil {
-                p.LogError.Printf("can't write to client's socket: %v", err)
+                p.LogDebug.Printf("can't write to client's socket: %v", err)
                 return
             }
         }
@@ -182,20 +182,42 @@ func (p *Proxy) Handle(inCon *net.TCPConn) {
         for {
             n, err := inCon.Read(fromClient)
             if err != nil {
-                p.LogError.Printf("can't read client's data: %v", err)
+                p.LogDebug.Printf("can't read client's data: %v", err)
                 return
             }
             n, err = outCon.Write(fromClient[:n])
             if err != nil {
-                p.LogError.Printf("can't write to server's socket: %v", err)
+                p.LogDebug.Printf("can't write to server's socket: %v", err)
                 return
             }
         }
     }()
-    p.LogDebug.Printf("finish session [c-s direction=%v]\n", <-end)
+    p.LogDebug.Printf("finish session[%v] [c-s direction=%v]\n", snum, <-end)
 }
 
 // LimitReached validates workers' limit
 func (p *Proxy) LimitReached() bool {
-    return (p.cfg.Workers != 0) && (p.Counter > p.cfg.Workers)
+    return (p.cfg.Workers != 0) && (p.counter > p.cfg.Workers)
+}
+
+// Start stats TCP proxy
+func (p *Proxy) Start() error {
+    ln, err := p.Listen()
+    if err != nil {
+        return err
+    }
+    for {
+        inConn, err := ln.AcceptTCP()
+        if err != nil {
+            p.LogError.Printf("can't accept incoming connection: %v\n", err)
+            continue
+        }
+        p.counter++
+        if p.LimitReached() {
+            p.LogError.Printf("can't accept incoming connection from %v: workers' limit is reached (%v)\n", inConn.RemoteAddr(), p.counter)
+            inConn.Close()
+            continue
+        }
+        go p.Handle(inConn, p.counter)
+    }
 }
