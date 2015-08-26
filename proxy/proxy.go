@@ -198,8 +198,5 @@ func (p *Proxy) Handle(inCon *net.TCPConn) {
 
 // LimitReached validates workers' limit
 func (p *Proxy) LimitReached() bool {
-    if p.cfg.Workers != 0 {
-        return false
-    }
-    return p.Counter > p.cfg.Workers
+    return (p.cfg.Workers != 0) && (p.Counter > p.cfg.Workers)
 }
