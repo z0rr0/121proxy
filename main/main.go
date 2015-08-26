@@ -18,7 +18,8 @@ const (
     // Config is a default configuration file name
     Config = "config.conf"
     // Name is a program name
-    Name = "123proxy"
+    Name    = "121proxy"
+    Comment = " It is a simple TCP proxy server.\n It forwards incoming TCP requests to remote server without any data changes."
 )
 
 var (
@@ -36,7 +37,7 @@ func interrupt() error {
 func main() {
     defer func() {
         if r := recover(); r != nil {
-            fmt.Printf("abnormal termination, reason: %v", r)
+            fmt.Printf("abnormal termination, reason: %v\n", r)
         }
     }()
     errc := make(chan error)
@@ -48,8 +49,9 @@ func main() {
     config := flag.String("config", Config, "configuration file")
     flag.Parse()
     if *version {
-        fmt.Printf("%v: %v %v %v\n", Name, Version, Revision, BuildDate)
+        fmt.Printf("%v: %v %v %v\n%v\n", Name, Version, Revision, BuildDate, Comment)
         // flag.PrintDefaults()
+        return
     }
     p, err := proxy.New(*config, *debug)
     if err != nil {

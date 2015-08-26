@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// It implements a simple TCP proxy server.
+// It forwards incoming TCP requests to remote servers without any data changes.
+//
 package proxy
 
 import (
@@ -12,21 +15,42 @@ import (
     "net"
     "os"
     "path/filepath"
+    "strings"
+    "sync"
 )
 
+// Config is struct to store configuration parameters
 type Config struct {
-    InPort  uint   `json:"inport"`
-    InHost  string `json:"inhost"`
-    OutPort uint   `json:"outport"`
-    OutHost string `json:"outhost"`
-    Workers uint   `json:"workers"`
+    InPort  uint     `json:"inport"`
+    InHost  string   `json:"inhost"`
+    OutPort uint     `json:"outport"`
+    OutHost []string `json:"outhost"`
+    Workers uint     `json:"workers"`
 }
 
+// Proxy is main struct to control proxy.
 type Proxy struct {
     cfg      *Config
+    servers  int
+    mutex    sync.Mutex
     LogDebug *log.Logger
     LogError *log.Logger
     Counter  uint
+}
+
+// getServer returns a current remote network address.
+// It can be used for easy load balancing.
+func (p *Proxy) getServer() string {
+    p.mutex.Lock()
+    lhosts := len(p.cfg.OutHost)
+    defer func() {
+        p.servers++
+        if p.servers >= lhosts {
+            p.servers = 0
+        }
+        p.mutex.Unlock()
+    }()
+    return fmt.Sprintf("%v:%v", p.cfg.OutHost[p.servers%lhosts], p.cfg.OutPort)
 }
 
 // readConfig read a configuratin file
@@ -60,6 +84,8 @@ func New(filename string, debug bool) (*Proxy, error) {
         err = fmt.Errorf(ermsg, "inport")
     case cfg.OutPort == 0:
         err = fmt.Errorf(ermsg, "outport")
+    case len(cfg.OutHost) == 0:
+        err = fmt.Errorf(ermsg, "outhost")
     case cfg.Workers == 0:
         fmt.Println("WARNING: workers is not configured, unlimited mode")
     }
@@ -67,7 +93,7 @@ func New(filename string, debug bool) (*Proxy, error) {
         return nil, err
     }
     p := &Proxy{
-        cfg,
+        cfg, 0, sync.Mutex{},
         log.New(ioutil.Discard, "DEBUG: ", log.Ldate|log.Ltime|log.Lshortfile),
         log.New(os.Stderr, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile),
         0,
@@ -79,10 +105,10 @@ func New(filename string, debug bool) (*Proxy, error) {
 }
 
 // Dial sets outcome connection
-func (p *Proxy) Dial() (*net.TCPConn, error) {
-    raddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%v:%v", p.cfg.OutHost, p.cfg.OutPort))
+func (p *Proxy) Dial(addr string) (*net.TCPConn, error) {
+    raddr, err := net.ResolveTCPAddr("tcp", addr)
     if err != nil {
-        p.LogError.Printf("can't resolve address: %v:%v\n", p.cfg.OutHost, p.cfg.OutPort)
+        p.LogError.Printf("can't resolve address: %v\n", addr)
         return nil, err
     }
     con, err := net.DialTCP("tcp", nil, raddr)
@@ -96,9 +122,10 @@ func (p *Proxy) Dial() (*net.TCPConn, error) {
 // Listen start to listen a socket
 func (p *Proxy) Listen() (*net.TCPListener, error) {
     // set incoming connection
-    laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%v:%v", p.cfg.InHost, p.cfg.InPort))
+    addr := fmt.Sprintf("%v:%v", p.cfg.InHost, p.cfg.InPort)
+    laddr, err := net.ResolveTCPAddr("tcp", addr)
     if err != nil {
-        p.LogError.Printf("can't resolve address: %v:%v\n", p.cfg.InHost, p.cfg.InPort)
+        p.LogError.Printf("can't resolve address: %v\n", addr)
         return nil, err
     }
     ln, err := net.ListenTCP("tcp", laddr)
@@ -106,7 +133,9 @@ func (p *Proxy) Listen() (*net.TCPListener, error) {
         p.LogError.Printf("can't listen tcp: %v:%v\n", laddr.IP, laddr.Port)
         return nil, err
     }
-    p.LogDebug.Printf("listen: %v:%v\n", laddr.IP, laddr.Port)
+    // ok, print info
+    fmt.Printf("Listen: %v\n", addr)
+    fmt.Printf("Remote servers: %v:%v\n", strings.Join(p.cfg.OutHost, ","), p.cfg.OutPort)
     return ln, nil
 }
 
@@ -117,7 +146,7 @@ func (p *Proxy) Handle(inCon *net.TCPConn) {
         inCon.Close()
         p.Counter--
     }()
-    outCon, err := p.Dial()
+    outCon, err := p.Dial(p.getServer())
     if err != nil {
         p.LogError.Printf("handle connection error: %v\n", err)
         return
@@ -169,5 +198,8 @@ func (p *Proxy) Handle(inCon *net.TCPConn) {
 
 // LimitReached validates workers' limit
 func (p *Proxy) LimitReached() bool {
+    if p.cfg.Workers != 0 {
+        return false
+    }
     return p.Counter > p.cfg.Workers
 }
