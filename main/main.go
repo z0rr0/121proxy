@@ -26,7 +26,7 @@ const (
 
 var (
 	// Version is a program version
-	Version = "v0.0"
+	Version = "0.0.0"
 	// Revision is CVS GIT version
 	Revision = "git:000000"
 	// BuildDate is date of build
@@ -54,7 +54,7 @@ func main() {
 	config := flag.String("config", Config, "configuration file")
 	flag.Parse()
 	if *version {
-		fmt.Printf("%v: %v %v %v\n%v\n", Name, Version, Revision, BuildDate, Comment)
+		fmt.Printf("%v %v %v %v\n%v\n", Name, Version, Revision, BuildDate, Comment)
 		// flag.PrintDefaults()
 		return
 	}
