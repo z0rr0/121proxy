@@ -17,7 +17,7 @@ import (
 
 const (
 	// Config is a default configuration file name
-	Config = "config.conf"
+	Config = "config.json"
 	// Name is a program name
 	Name = "121proxy"
 	// Comment is a general program comment

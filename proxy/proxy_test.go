@@ -20,7 +20,7 @@ import (
 
 const (
 	// $GOPATH/testConf
-	testConf = "test.conf"
+	testConf = "test.json"
 )
 
 func echoServer(t *testing.T, cfg *Config) error {

@@ -13,19 +13,19 @@ if [ ! -x "$gobin" ]; then
 fi
 
 # prepare test config
-cfgname="${GOPATH}/test.conf"
-if [[ ! -f ${GOPATH}/src/${repo}/config.conf ]]; then
-	echo "ERROR: not found file: ${GOPATH}/src/${repo}/config.conf"
+cfgname="${GOPATH}/test.json"
+if [[ ! -f ${GOPATH}/src/${repo}/config.json ]]; then
+	echo "ERROR: not found file: ${GOPATH}/src/${repo}/config.json"
 	exit 3
 fi
 
-cp -f ${GOPATH}/src/${repo}/config.conf $cfgname
+cp -f ${GOPATH}/src/${repo}/config.json $cfgname
 /bin/sed -i 's/\/\/.*$//g' $cfgname
 
 cd ${GOPATH}/src/${repo}/proxy
 go test -v -cover -coverprofile=coverage.out -trace trace.out || exit 1
 
-rm -f $cfgname
+# rm -f $cfgname
 
 echo "all tests done, use next command to view profiling results:"
 echo "go tool cover -html=<package_path>/coverage.out"
