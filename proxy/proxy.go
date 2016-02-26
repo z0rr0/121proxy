@@ -34,7 +34,7 @@ type Proxy struct {
 	servers  int
 	mutex    sync.Mutex
 	LogDebug *log.Logger
-	LogError *log.Logger
+	LogInfo  *log.Logger
 	counter  int64
 	inAddr   string
 	outAddr  []string
@@ -108,7 +108,7 @@ func New(filename string, debug bool) (*Proxy, error) {
 	p := &Proxy{
 		cfg:      cfg,
 		LogDebug: log.New(ioutil.Discard, "DEBUG: ", log.Ldate|log.Ltime|log.Lshortfile),
-		LogError: log.New(os.Stderr, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile),
+		LogInfo:  log.New(os.Stderr, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile),
 		inAddr:   net.JoinHostPort(cfg.InHost, fmt.Sprint(cfg.InPort)),
 		outAddr:  outAddr,
 	}
@@ -123,12 +123,12 @@ func (p *Proxy) Dial() (*net.TCPConn, error) {
 	addr := p.getServer()
 	raddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
-		p.LogError.Printf("can't resolve address: %v\n", addr)
+		p.LogInfo.Printf("can't resolve address: %v\n", addr)
 		return nil, err
 	}
 	con, err := net.DialTCP("tcp", nil, raddr)
 	if err != nil {
-		p.LogError.Printf("can't set tcp connection to %v:%v\n", raddr.IP, raddr.Port)
+		p.LogInfo.Printf("can't setup tcp connection to %v:%v\n", raddr.IP, raddr.Port)
 		return nil, err
 	}
 	return con, nil
@@ -139,12 +139,12 @@ func (p *Proxy) Listen() (*net.TCPListener, error) {
 	// set incoming connection
 	laddr, err := net.ResolveTCPAddr("tcp", p.inAddr)
 	if err != nil {
-		p.LogError.Printf("can't resolve address: %v\n", p.inAddr)
+		p.LogInfo.Printf("can't resolve address: %v\n", p.inAddr)
 		return nil, err
 	}
 	ln, err := net.ListenTCP("tcp", laddr)
 	if err != nil {
-		p.LogError.Printf("can't listen tcp: %v:%v\n", laddr.IP, laddr.Port)
+		p.LogInfo.Printf("can't listen tcp: %v:%v\n", laddr.IP, laddr.Port)
 		return nil, err
 	}
 	// ok, print info
@@ -162,7 +162,7 @@ func (p *Proxy) Handle(inCon *net.TCPConn, num int64) {
 	}()
 	outCon, err := p.Dial()
 	if err != nil {
-		p.LogError.Printf("handle connection error: %v\n", err)
+		p.LogInfo.Printf("handle connection error: %v\n", err)
 		return
 	}
 	defer outCon.Close()
@@ -219,7 +219,7 @@ func (p *Proxy) Start() error {
 		// handler should close this connection late
 		inConn, err := ln.AcceptTCP()
 		if err != nil {
-			p.LogError.Printf("can't accept incoming connection: %v\n", err)
+			p.LogInfo.Printf("can't accept incoming connection: %v\n", err)
 			continue
 		}
 		num := atomic.AddInt64(&p.counter, 1)

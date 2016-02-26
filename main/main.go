@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/z0rr0/121proxy/proxy"
@@ -54,7 +55,7 @@ func main() {
 	config := flag.String("config", Config, "configuration file")
 	flag.Parse()
 	if *version {
-		fmt.Printf("%v %v %v %v\n%v\n", Name, Version, Revision, BuildDate, Comment)
+		fmt.Printf("%v %v %v %v %v\n%v\n", Name, Version, Revision, runtime.Version(), BuildDate, Comment)
 		// flag.PrintDefaults()
 		return
 	}
