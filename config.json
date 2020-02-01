@@ -1,7 +1,7 @@
 {
-  "inport": 15000,          // listen this port
-  "inhost": "",             // listen on this host/IP
-  "outport": 10000,         // forward to this port
-  "outhost": ["localhost"], // forward to this host
-  "workers": [2, 8]         // incoming request limits [workers, queue size]
+  "inport": 15000,
+  "inhost": "",
+  "outport": 10000,
+  "outhost": ["localhost"],
+  "workers": [2, 8]
 }
