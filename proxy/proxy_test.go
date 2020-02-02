@@ -8,12 +8,15 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -24,12 +27,13 @@ var (
 	cfgPath = filepath.Join(os.TempDir(), testConf)
 )
 
-func echoServer(t *testing.T, port int) error {
+func echoServer(t *testing.T, port uint, ch chan net.Listener) error {
 	ln, err := net.Listen("tcp", net.JoinHostPort("localhost", fmt.Sprint(port)))
 	if err != nil {
 		t.Log(err)
 		return err
 	}
+	ch <- ln
 	for {
 		c, err := ln.Accept()
 		if err != nil {
@@ -51,88 +55,120 @@ func echoServer(t *testing.T, port int) error {
 	}
 }
 
-func TestNew(t *testing.T) {
-	_, err := New("badfile")
-	if err == nil {
-		t.Error(err)
-	}
-	_, err = New(cfgPath)
-	if err != nil {
-		t.Error(err)
-	}
-}
-
-//func TestStart(t *testing.T) {
-//	// read test configuration, expected:
-//	// localhost:15000 <-> localhost:10000
-//	conFile := filepath.Join(os.Getenv("GOPATH"), testConf)
-//	cfg, err := readConfig(conFile)
+//func TestNew(t *testing.T) {
+//	_, err := New("badfile")
+//	if err == nil {
+//		t.Error(err)
+//	}
+//	_, err = New(cfgPath)
 //	if err != nil {
 //		t.Error(err)
 //	}
-//	errc := make(chan error)
-//	go func() {
-//		t.Errorf("abnormal action: %v", <-errc)
-//	}()
-//	// create "remote" TCP server
-//	go func() {
-//		errc <- echoServer(t, cfg)
-//	}()
-//	// init proxy
-//	p, err := New(conFile, true)
-//	if err != nil {
-//		t.Errorf("proxy init error: %v", err)
-//		return
-//	}
-//	go func() {
-//		errc <- p.Start()
-//	}()
-//	// create "remote" TCP client
-//	proxyAddr := fmt.Sprintf("%v:%v", cfg.InHost, cfg.InPort)
-//	raddr, err := net.ResolveTCPAddr("tcp", proxyAddr)
-//	if err != nil {
-//		t.Errorf("tcp resolve error: %v", err)
-//		return
-//	}
-//	time.Sleep(50 * time.Millisecond)
-//	con, err := net.DialTCP("tcp", nil, raddr)
-//	if err != nil {
-//		t.Errorf("tcp connection error: %v", err)
-//		return
-//	}
-//	defer con.Close()
-//	values := []string{"a", "ab", "abc", "abcd", "abcde"}
-//	// start reader
-//	go func() {
-//		j, v := 0, []byte(strings.Join(values, ""))
-//		for {
-//			b := make([]byte, 8)
-//			n, err := con.Read(b)
-//			if err != nil {
-//				t.Logf("unexpected: %v", err)
-//			} else {
-//				t.Logf("read: %v", string(b[:n]))
-//				for i := 0; i < n; i++ {
-//					if v[j+i] != b[i] {
-//						t.Errorf("incorrect values: %v != %v", v[j+i], b[i])
-//					}
-//				}
-//				j = j + n
-//			}
-//			if j == (len(v) - 1) {
-//				return
-//			}
-//		}
-//	}()
-//	time.Sleep(50 * time.Millisecond)
-//	// write
-//	// b := make([]byte, 8)
-//	for _, v := range values {
-//		t.Logf("try to write: %v", v)
-//		_, err := con.Write([]byte(v))
-//		if err != nil {
-//			t.Errorf("write error: %v", err)
-//		}
-//	}
-//	time.Sleep(50 * time.Millisecond)
 //}
+
+func TestStart(t *testing.T) {
+	// read test configuration, expected:
+	// localhost:15001 <-> localhost:15002
+	//conFile := filepath.Join(os.Getenv("GOPATH"), testConf)
+	p, err := New(cfgPath)
+	if err != nil {
+		t.Error(err)
+	}
+	errc := make(chan error)
+	// create "remote" TCP server
+	echoListener := make(chan net.Listener)
+	serverPort := p.Hosts[0].Dst.Port
+	go func() {
+		if err := echoServer(t, serverPort, echoListener); err != nil {
+			t.Logf("echo server stop: %v\n", err)
+		}
+	}()
+	go func() {
+		errc <- p.Start()
+		l := <-echoListener
+		if err := l.Close(); err != nil {
+			t.Logf("echo server listener error: %v", err)
+		}
+	}()
+	// create "remote" TCP client
+	proxyAddr := p.Hosts[0].Src.Addr()
+	raddr, err := net.ResolveTCPAddr("tcp", proxyAddr)
+	if err != nil {
+		t.Errorf("tcp resolve error: %v", err)
+		return
+	}
+	time.Sleep(1000 * time.Millisecond)
+	con, err := net.DialTCP("tcp", nil, raddr)
+	if err != nil {
+		t.Errorf("tcp connection error: %v", err)
+		return
+	}
+	doneCh := make(chan struct{})
+	defer func() {
+		//if e := con.Close(); e != nil {
+		//	t.Error(e)
+		//}
+		close(doneCh)
+	}()
+	values := []string{"a", "ab", "abc", "abcd", "abcde"}
+	// start reader
+	go func() {
+		j, v := 0, []byte(strings.Join(values, ""))
+		for {
+			b := make([]byte, 8)
+			n, err := con.Read(b)
+			if err != nil {
+				t.Logf("unexpected: %v", err)
+				return
+			}
+			fmt.Println("xaz read-" + string(b[:n]))
+			t.Logf("read: %v", string(b[:n]))
+			for i := 0; i < n; i++ {
+				if v[j+i] != b[i] {
+					t.Errorf("incorrect values: %v != %v", v[j+i], b[i])
+				}
+			}
+			j = j + n
+			if j == (len(v) - 1) {
+				return
+			}
+		}
+	}()
+	// write
+	go func() {
+		for _, v := range values {
+			t.Logf("try to write: %v", v)
+			_, err := con.Write([]byte(v))
+			if err != nil {
+				t.Errorf("write error: %v", err)
+			}
+		}
+
+		fmt.Println("xaz shutdown-1")
+		if err := p.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown error: %v\n", err)
+		}
+		fmt.Println("xaz shutdown-2")
+		close(doneCh)
+	}()
+	//for _, v := range values {
+	//	t.Logf("try to write: %v", v)
+	//	_, err := con.Write([]byte(v))
+	//	if err != nil {
+	//		t.Errorf("write error: %v", err)
+	//	}
+	//}
+	//time.Sleep(1000 * time.Millisecond)
+	//go func() {
+	//	fmt.Println("xaz shutdown-1")
+	//	if err := p.Shutdown(context.Background()); err != nil {
+	//		t.Errorf("shutdown error: %v\n", err)
+	//	}
+	//	fmt.Println("xaz shutdown-2")
+	//	close(doneCh)
+	//}()
+	if err := <-errc; err != nil {
+		t.Error(err)
+	}
+	<-doneCh
+}
