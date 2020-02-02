@@ -1,7 +1,15 @@
 {
-  "inport": 15000,
-  "inhost": "",
-  "outport": 10000,
-  "outhost": ["localhost"],
-  "workers": [2, 8]
+  "hosts": [
+    {
+      "src": {"host": "localhost", "port":  15001},
+      "dst": {"host": "localhost", "port":  15002},
+      "limit": 10
+    },
+    {
+      "src": {"host": "localhost", "port":  15003},
+      "dst": {"host": "localhost", "port":  15004},
+      "limit": 10
+    }
+  ],
+  "monitoring": 5
 }

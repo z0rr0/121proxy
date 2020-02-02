@@ -7,184 +7,125 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
-// Config is struct to store configuration parameters
-type Config struct {
-	InPort  uint     `json:"inport"`
-	InHost  string   `json:"inhost"`
-	OutPort uint     `json:"outport"`
-	OutHost []string `json:"outhost"`
-	Workers [2]uint  `json:"workers"`
+var (
+	// ErrClosed is shutdown error.
+	ErrClosed = errors.New("closing")
+
+	// internal logger
+	info             = log.New(os.Stdout, fmt.Sprintf("INFO [121proxy]: "), log.Ldate|log.Ltime|log.Lshortfile)
+	shutdownInterval = 250 * time.Millisecond
+)
+
+// NetCfg is net client settings.
+type NetCfg struct {
+	Host string `json:"host"`
+	Port uint   `json:"port"`
 }
 
-// Proxy is main struct to control proxy.
+// HostCfg is a proxy settings.
+type HostCfg struct {
+	Src     NetCfg        `json:"src"`
+	Dst     NetCfg        `json:"dst"`
+	Limit   int64         `json:"limit"`
+	done    chan struct{} // shutdown
+	counter int64
+}
+
+// Proxy is struct to store hosts configuration parameters
 type Proxy struct {
-	cfg      *Config
-	servers  int
-	mutex    sync.Mutex
-	LogDebug *log.Logger
-	LogInfo  *log.Logger
-	counter  int64
-	inAddr   string
-	outAddr  []string
+	Hosts      []HostCfg `json:"hosts"`
+	Monitoring int        `json:"monitoring"`
+	inShutdown int32
+	mu         sync.Mutex
+	listeners  []*net.TCPListener
+	isStopped  bool
 }
 
-// conn is proxy connection data
-type conn struct {
-	num   int64
-	proxy *Proxy
-	c     *net.TCPConn
+// Addr returns a network address "host:port".
+func (n *NetCfg) Addr() string {
+	return net.JoinHostPort(n.Host, fmt.Sprint(n.Port))
 }
 
-// getServer returns a current remote network address
-// using round robin. It can be used for easy load balancing.
-func (p *Proxy) getServer() string {
-	p.mutex.Lock()
-	lhosts := len(p.outAddr)
-	defer func() {
-		p.servers++
-		if p.servers >= lhosts {
-			p.servers = 0
-		}
-		p.mutex.Unlock()
-	}()
-	return p.outAddr[p.servers%lhosts]
+// Name returns a host configuration settings string.
+func (h *HostCfg) Name() string {
+	return fmt.Sprintf("%v <-> %v", h.Src.Addr(), h.Dst.Addr())
 }
 
-// readConfig read a configuratin file
-func readConfig(name string) (*Config, error) {
-	cfg := &Config{}
-	fullpath, err := filepath.Abs(name)
+// Listen starts to listen source socket.
+func (h *HostCfg) Listen() (*net.TCPListener, error) {
+	netAddress := h.Src.Addr()
+	addr, err := net.ResolveTCPAddr("tcp", netAddress)
 	if err != nil {
-		return cfg, err
+		return nil, fmt.Errorf("failed resolve %v: %v", netAddress, err)
 	}
-	_, err = os.Stat(fullpath)
+	ln, err := net.ListenTCP("tcp", addr)
 	if err != nil {
-		return cfg, err
+		return nil, fmt.Errorf("failed listen %v: %v", netAddress, err)
 	}
-	jsondata, jerr := ioutil.ReadFile(fullpath)
-	if jerr != nil {
-		return cfg, err
-	}
-	err = json.Unmarshal(jsondata, cfg)
-	return cfg, err
+	return ln, nil
 }
 
-// New creates new proxy structure.
-func New(filename string, debug bool) (*Proxy, error) {
-	const ermsg string = "incorrect configuration parameter: %v"
-	cfg, err := readConfig(filename)
+// Dial sets outcome connection to remote dst host.
+func (h *HostCfg) Dial() (*net.TCPConn, error) {
+	addr := h.Dst.Addr()
+	remoteAddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't resolve address %v: %v", addr, err)
 	}
-	switch {
-	case cfg.InPort == 0:
-		err = fmt.Errorf(ermsg, "inport")
-	case cfg.OutPort == 0:
-		err = fmt.Errorf(ermsg, "outport")
-	case len(cfg.OutHost) == 0:
-		err = fmt.Errorf(ermsg, "outhost")
-	case (cfg.Workers[0] == 0) || (cfg.Workers[1] == 0):
-		fmt.Println("WARNING: workers is not configured, unlimited mode")
-	}
+	con, err := net.DialTCP("tcp", nil, remoteAddr)
 	if err != nil {
-		return nil, err
-	}
-	outAddr := make([]string, len(cfg.OutHost))
-	for i, host := range cfg.OutHost {
-		outAddr[i] = net.JoinHostPort(host, fmt.Sprint(cfg.OutPort))
-	}
-	p := &Proxy{
-		cfg:      cfg,
-		LogDebug: log.New(ioutil.Discard, "DEBUG: ", log.Ldate|log.Ltime|log.Lshortfile),
-		LogInfo:  log.New(os.Stderr, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile),
-		inAddr:   net.JoinHostPort(cfg.InHost, fmt.Sprint(cfg.InPort)),
-		outAddr:  outAddr,
-	}
-	if debug {
-		p.LogDebug = log.New(os.Stdout, "DEBUG: ", log.Ldate|log.Ltime|log.Lshortfile)
-	}
-	return p, nil
-}
-
-// Dial sets outcome connection
-func (p *Proxy) Dial() (*net.TCPConn, error) {
-	addr := p.getServer()
-	raddr, err := net.ResolveTCPAddr("tcp", addr)
-	if err != nil {
-		p.LogInfo.Printf("can't resolve address: %v\n", addr)
-		return nil, err
-	}
-	con, err := net.DialTCP("tcp", nil, raddr)
-	if err != nil {
-		p.LogInfo.Printf("can't setup tcp connection to %v:%v\n", raddr.IP, raddr.Port)
-		return nil, err
+		return nil, fmt.Errorf("can't setup tcp connection to %v: %v", addr, err)
 	}
 	return con, nil
 }
 
-// Listen start to listen a socket
-func (p *Proxy) Listen() (*net.TCPListener, error) {
-	// set incoming connection
-	laddr, err := net.ResolveTCPAddr("tcp", p.inAddr)
-	if err != nil {
-		p.LogInfo.Printf("can't resolve address: %v\n", p.inAddr)
-		return nil, err
-	}
-	ln, err := net.ListenTCP("tcp", laddr)
-	if err != nil {
-		p.LogInfo.Printf("can't listen tcp: %v:%v\n", laddr.IP, laddr.Port)
-		return nil, err
-	}
-	// ok, print info
-	fmt.Printf("Listen: %v\n", p.inAddr)
-	fmt.Printf("Remote servers: %v\n", strings.Join(p.outAddr, ", "))
-	return ln, nil
-}
-
-// Handle handles new incomming connection
-func (p *Proxy) Handle(inCon *net.TCPConn, num int64) {
+// Run does transmission data between clients.
+func (h *HostCfg) Run(inCon *net.TCPConn) error {
 	const buffer = 32
 	defer func() {
-		inCon.Close()
-		atomic.AddInt64(&p.counter, -1)
+		if err := inCon.Close(); err != nil {
+			info.Printf("inCon close error: %v\n", err)
+		}
 	}()
-	outCon, err := p.Dial()
+	outCon, err := h.Dial()
 	if err != nil {
-		p.LogInfo.Printf("handle connection error: %v\n", err)
-		return
+		return err
 	}
-	defer outCon.Close()
-	end := make(chan string)
+	defer func() {
+		if err := outCon.Close(); err != nil {
+			info.Printf("outCon close error: %v\n", err)
+		}
+	}()
 	fromServer, fromClient := make([]byte, buffer), make([]byte, buffer)
-	p.LogDebug.Printf("session [%v]: %v-%v <-> %v-%v\n", num,
-		inCon.LocalAddr(), inCon.RemoteAddr(),
-		outCon.LocalAddr(), outCon.RemoteAddr())
+	end := make(chan struct{})
 	// client (incCon) <- proxy <- server (outCon)
 	transmission := func(in, out *net.TCPConn, b []byte, name string) {
 		defer func() {
-			end <- name
+			end <- struct{}{}
 		}()
 		for {
 			n, err := in.Read(b)
 			if err != nil {
-				p.LogDebug.Printf("can't read data [%s]: %v", name, err)
+				info.Printf("can't read data %s [%s]: %v", h.Name(), name, err)
 				return
 			}
 			n, err = out.Write(b[:n])
 			if err != nil {
-				p.LogDebug.Printf("can't write data [%s]: %v", name, err)
+				info.Printf("can't write data %s [%s]: %v", h.Name(), name, err)
 				return
 			}
 		}
@@ -193,36 +134,163 @@ func (p *Proxy) Handle(inCon *net.TCPConn, num int64) {
 	go transmission(outCon, inCon, fromServer, "server")
 	// client -> server
 	go transmission(inCon, outCon, fromClient, "client")
-	p.LogDebug.Printf("finish session[%v] [initiator=%v]\n", num, <-end)
-}
-
-// worker get incoming request from channel ch and
-// runs its handler.
-func worker(ch chan conn) {
-	for cn := range ch {
-		cn.proxy.Handle(cn.c, cn.num)
-	}
-}
-
-// Start stats TCP proxy
-func (p *Proxy) Start() error {
-	var i uint
-	ln, err := p.Listen()
-	if err != nil {
-		return err
-	}
-	ch := make(chan conn, p.cfg.Workers[1])
-	for i = 0; i < p.cfg.Workers[0]; i++ {
-		go worker(ch)
-	}
+	// exit only if an error occurred or shutdown was called
 	for {
-		// handler should close this connection late
-		inConn, err := ln.AcceptTCP()
-		if err != nil {
-			p.LogInfo.Printf("can't accept incoming connection: %v\n", err)
-			continue
+		select {
+		case <-end:
+			return nil
+		case <-h.done:
+			return ErrClosed
 		}
-		num := atomic.AddInt64(&p.counter, 1)
-		ch <- conn{num, p, inConn}
 	}
+}
+
+// HandleHost accepts incoming request for new proxy connections.
+func (p *Proxy) HandleHost(i int, done chan int) {
+	var (
+		wg           sync.WaitGroup
+		reachedLimit bool
+	)
+	ln := p.listeners[i]
+	h := p.Hosts[i]
+	for {
+		if p.shuttingDoneCalled() {
+			// don't accept new connections if shutdown was called
+			// but waits closing for all active ones using `wg sync.WaitGroup`
+			break
+		}
+		if n := atomic.LoadInt64(&h.counter); n < h.Limit {
+			reachedLimit = false
+			inConn, err := ln.AcceptTCP()
+			if err != nil {
+				info.Printf("can not accept: %v\n", h.Src.Addr())
+				continue
+			}
+			wg.Add(1)
+			atomic.AddInt64(&h.counter, 1)
+			go func() {
+				defer func() {
+					wg.Done()
+					atomic.AddInt64(&h.counter, -1)
+				}()
+				if err := h.Run(inConn); err != nil && err != ErrClosed {
+					info.Printf("failed handler run %v: %v", h.Name(), err)
+				}
+			}()
+		} else {
+			if !reachedLimit {
+				info.Printf("limit %d is reached for settings=%d %s", h.Limit, i, h.Name())
+				reachedLimit = true
+			}
+		}
+	}
+	wg.Wait()
+	done <- i
+}
+
+// Start initializes and runs TCP proxy.
+func (p *Proxy) Start() error {
+	var err error
+	if p.shuttingDoneCalled() {
+		return ErrClosed
+	}
+	n := len(p.Hosts)
+	p.listeners = make([]*net.TCPListener, n)
+	for i, h := range p.Hosts {
+		ln, err := h.Listen()
+		if err != nil {
+			return err
+		}
+		p.listeners[i] = ln
+		// for shutdown, will be closed after closeListeners
+		p.Hosts[i].done = make(chan struct{})
+		info.Printf("listen %v\n", h.Src.Addr())
+	}
+	done := make(chan int, n)
+	for i := range p.listeners {
+		go p.HandleHost(i, done)
+	}
+	// periodic show hosts counters
+	if p.Monitoring > 0 {
+		m := time.NewTicker(time.Duration(p.Monitoring) * time.Second)
+		defer m.Stop()
+		go p.monitoring(m)
+	}
+	// wait shutdown closing from all listeners
+	for range done {
+		n--
+		if n == 0 {
+			break
+		}
+	}
+	close(done) // all HandleHost calls were finished
+	atomic.StoreInt32(&p.inShutdown, 2)
+	return err
+}
+
+func (p *Proxy) monitoring(m *time.Ticker) {
+	for range m.C {
+		for i, h := range p.Hosts {
+			info.Printf("monitoring host %s used counter %d", h.Name(), atomic.LoadInt64(&p.Hosts[i].counter))
+		}
+	}
+}
+
+func (p *Proxy) shuttingDoneCalled() bool {
+	return atomic.LoadInt32(&p.inShutdown) != 0
+}
+
+func (p *Proxy) shuttingDownFinished() bool {
+	return atomic.LoadInt32(&p.inShutdown) == 2
+}
+
+// Shutdown gracefully shutdowns handlers.
+func (p *Proxy) Shutdown(ctx context.Context) error {
+	var err error
+	atomic.StoreInt32(&p.inShutdown, 1)
+	for i := range p.Hosts {
+		close(p.Hosts[i].done)
+		if e := p.listeners[i].Close(); e != nil && err == nil {
+			err = e
+		}
+	}
+	ticker := time.NewTicker(shutdownInterval)
+	defer ticker.Stop()
+	for {
+		if p.shuttingDownFinished() {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			//return errors.New("timed out")
+		}
+	}
+}
+
+// New creates new proxy structure.
+func New(fileName string) (*Proxy, error) {
+	p := &Proxy{}
+	fullPath, err := filepath.Abs(fileName)
+	if err != nil {
+		return nil, err
+	}
+	data, err := ioutil.ReadFile(fullPath)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(data, p)
+	if err != nil {
+		return nil, err
+	}
+	if n := len(p.Hosts); n < 1 {
+		return nil, fmt.Errorf("no cofiguration hosts")
+	}
+	for i := range p.Hosts {
+		if p.Hosts[i].Limit < 1 {
+			return nil, fmt.Errorf("failed limit for host #%v", i)
+		}
+	}
+	return p, nil
 }

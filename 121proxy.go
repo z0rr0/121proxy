@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -22,7 +23,8 @@ const (
 	// Name is a program name
 	Name = "121proxy"
 	// Comment is a general program comment
-	Comment = " It is a simple TCP proxy server.\n It forwards incoming TCP requests to remote server without any data changes."
+	Comment = " It is a simple TCP proxy server.\n " +
+		"It forwards incoming TCP requests to remote server without any data changes."
 )
 
 var (
@@ -34,23 +36,12 @@ var (
 	BuildDate = "1900-00-00_00:00:00UTC"
 )
 
-func interrupt() error {
-	c := make(chan os.Signal)
-	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
-	return fmt.Errorf("%v", <-c)
-}
-
 func main() {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("abnormal termination, reason: %v\n", r)
 		}
 	}()
-	errc := make(chan error)
-	go func() {
-		errc <- interrupt()
-	}()
-	debug := flag.Bool("debug", false, "debug mode")
 	version := flag.Bool("version", false, "print version info")
 	config := flag.String("config", Config, "configuration file")
 	flag.Parse()
@@ -59,12 +50,24 @@ func main() {
 		// flag.PrintDefaults()
 		return
 	}
-	p, err := proxy.New(*config, *debug)
+	p, err := proxy.New(*config)
 	if err != nil {
 		panic(err)
 	}
+	c := make(chan struct{})
 	go func() {
-		errc <- p.Start()
+		sigint := make(chan os.Signal)
+		signal.Notify(sigint, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
+		<-sigint
+
+		if err := p.Shutdown(context.Background()); err != nil {
+			fmt.Printf("shutdown error: %v\n", err)
+		}
+		close(c)
 	}()
-	fmt.Printf("termination, reason: %v\n", <-errc)
+	if err := p.Start(); err != nil {
+		fmt.Printf("proxy error: %v\n", err)
+	}
+	<-c
+	fmt.Println("termination")
 }
