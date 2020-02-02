@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/z0rr0/121proxy/proxy"
 )
@@ -60,7 +61,9 @@ func main() {
 		signal.Notify(sigint, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 		<-sigint
 
-		if err := p.Shutdown(context.Background()); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := p.Shutdown(ctx); err != nil {
 			fmt.Printf("shutdown error: %v\n", err)
 		}
 		close(c)

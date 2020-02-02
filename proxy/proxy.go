@@ -24,7 +24,6 @@ import (
 var (
 	// ErrClosed is shutdown error.
 	ErrClosed = errors.New("closing")
-
 	// internal logger
 	info             = log.New(os.Stdout, fmt.Sprintf("INFO [121proxy]: "), log.Ldate|log.Ltime|log.Lshortfile)
 	shutdownInterval = 250 * time.Millisecond
@@ -47,12 +46,10 @@ type HostCfg struct {
 
 // Proxy is struct to store hosts configuration parameters
 type Proxy struct {
-	Hosts      []HostCfg `json:"hosts"`
+	Hosts      []*HostCfg `json:"hosts"`
 	Monitoring int        `json:"monitoring"`
 	inShutdown int32
-	mu         sync.Mutex
 	listeners  []*net.TCPListener
-	isStopped  bool
 }
 
 // Addr returns a network address "host:port".
@@ -231,7 +228,7 @@ func (p *Proxy) Start() error {
 func (p *Proxy) monitoring(m *time.Ticker) {
 	for range m.C {
 		for i, h := range p.Hosts {
-			info.Printf("monitoring host %s used counter %d", h.Name(), atomic.LoadInt64(&p.Hosts[i].counter))
+			info.Printf("monitoring host [%d] %s used counter %d", i, h.Name(), atomic.LoadInt64(&h.counter))
 		}
 	}
 }

@@ -1,12 +1,12 @@
-NAME=$(shell basename "$(PWD)")
 TS=$(shell date -u +"%F_%T")
 TAG=$(shell git tag | sort --version-sort | tail -1)
 COMMIT=$(shell git log --oneline | head -1)
 VERSION=$(firstword $(COMMIT))
-TARGET="121proxy.go"
-BINPROXY="121poxy"
-BINSERVER="echo_server"
+TARGET=121proxy.go
+BINPROXY=$(shell basename "$(PWD)")
+BINSERVER=echo_server
 
+all: clean server build
 
 lint:
 	go vet 121proxy.go
@@ -23,9 +23,7 @@ params:
 	@echo "  >  $(NAME) -TS $(TS) - $(TAG) - $(VERSION)"
 
 server: lint
-	go build -a -o $(BINSERVER) server/server.go
+	go build -o $(BINSERVER) server/server.go
 
 clean:
 	rm -vf $(BINPROXY) $(BINSERVER)
-
-all: clean server build

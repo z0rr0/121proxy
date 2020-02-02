@@ -27,3 +27,4 @@ trace.out
 
 # result binary file
 121proxy
+echo_server
