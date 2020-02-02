@@ -5,19 +5,25 @@ VERSION=$(firstword $(COMMIT))
 TARGET=121proxy.go
 BINPROXY=$(shell basename "$(PWD)")
 BINSERVER=echo_server
+PROXYPKG=github.com/z0rr0/121proxy/proxy
+TESTCFG=/tmp/121cfg.json
 
 all: clean server build
 
 lint:
 	go vet 121proxy.go
-	go vet proxy/proxy.go
+	go vet $(PROXYPKG)
 	go vet server/server.go
 	golint 121proxy.go
-	golint proxy/proxy.go
+	golint $(PROXYPKG)
 	golint server/server.go
 
 build: lint
 	go build -o $(BINPROXY) -ldflags '-X main.Version=$(TAG) -X main.Revision=git:$(VERSION) -X main.BuildDate=$(TS)' $(TARGET)
+
+test: lint
+	@-cp config.json $(TESTCFG)
+	go test -race -v -cover -coverprofile=coverage.out -trace trace.out $(PROXYPKG)
 
 params:
 	@echo "  >  $(NAME) -TS $(TS) - $(TAG) - $(VERSION)"
