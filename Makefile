@@ -5,6 +5,7 @@ VERSION=$(firstword $(COMMIT))
 TARGET=121proxy.go
 BINPROXY=$(shell basename "$(PWD)")
 BINSERVER=echo_server
+COVERAGE=coverage.out
 PROXYPKG=github.com/z0rr0/121proxy/proxy
 TESTCFG=/tmp/121cfg.json
 
@@ -18,12 +19,12 @@ lint:
 	golint $(PROXYPKG)
 	golint server/server.go
 
-build: lint
-	go build -o $(BINPROXY) -ldflags '-X main.Version=$(TAG) -X main.Revision=git:$(VERSION) -X main.BuildDate=$(TS)' $(TARGET)
-
 test: lint
 	@-cp config.json $(TESTCFG)
-	go test -race -v -cover -coverprofile=coverage.out -trace trace.out $(PROXYPKG)
+	go test -race -v -cover -coverprofile=$(COVERAGE) -trace trace.out $(PROXYPKG)
+
+build: test
+	go build -o $(BINPROXY) -ldflags '-X main.Version=$(TAG) -X main.Revision=git:$(VERSION) -X main.BuildDate=$(TS)' $(TARGET)
 
 params:
 	@echo "  >  $(NAME) -TS $(TS) - $(TAG) - $(VERSION)"
@@ -32,4 +33,4 @@ server: lint
 	go build -o $(BINSERVER) server/server.go
 
 clean:
-	rm -vf $(BINPROXY) $(BINSERVER)
+	rm -vf $(BINPROXY) $(BINSERVER) $(COVERAGE)

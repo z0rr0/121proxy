@@ -30,20 +30,18 @@ var (
 func echoServer(t *testing.T, port uint, ch chan net.Listener) error {
 	ln, err := net.Listen("tcp", net.JoinHostPort("localhost", fmt.Sprint(port)))
 	if err != nil {
-		t.Log(err)
+		t.Error(err)
 		return err
 	}
 	ch <- ln
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			t.Log(err)
 			return err
 		}
 		t.Logf("\naccept from %v\n", c.RemoteAddr())
 		go func() {
 			defer func() {
-				fmt.Printf("\nclose from %v\n", c.RemoteAddr())
 				if e := c.Close(); e != nil {
 					t.Logf("failed close echo server: %v\n", err)
 				}
@@ -55,16 +53,16 @@ func echoServer(t *testing.T, port uint, ch chan net.Listener) error {
 	}
 }
 
-//func TestNew(t *testing.T) {
-//	_, err := New("badfile")
-//	if err == nil {
-//		t.Error(err)
-//	}
-//	_, err = New(cfgPath)
-//	if err != nil {
-//		t.Error(err)
-//	}
-//}
+func TestNew(t *testing.T) {
+	_, err := New("badfile")
+	if err == nil {
+		t.Error(err)
+	}
+	_, err = New(cfgPath)
+	if err != nil {
+		t.Error(err)
+	}
+}
 
 func TestStart(t *testing.T) {
 	// read test configuration, expected:
@@ -84,8 +82,8 @@ func TestStart(t *testing.T) {
 		}
 	}()
 	go func() {
-		errc <- p.Start()
 		l := <-echoListener
+		errc <- p.Start()
 		if err := l.Close(); err != nil {
 			t.Logf("echo server listener error: %v", err)
 		}
@@ -97,32 +95,28 @@ func TestStart(t *testing.T) {
 		t.Errorf("tcp resolve error: %v", err)
 		return
 	}
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond) // wait proxy start
 	con, err := net.DialTCP("tcp", nil, raddr)
 	if err != nil {
 		t.Errorf("tcp connection error: %v", err)
 		return
 	}
-	doneCh := make(chan struct{})
-	defer func() {
-		//if e := con.Close(); e != nil {
-		//	t.Error(e)
-		//}
-		close(doneCh)
-	}()
+	writeDone := make(chan bool)
+	readDone := make(chan bool)
+
 	values := []string{"a", "ab", "abc", "abcd", "abcde"}
-	// start reader
+	// start client reader
 	go func() {
+		defer close(readDone)
 		j, v := 0, []byte(strings.Join(values, ""))
 		for {
-			b := make([]byte, 8)
+			b := make([]byte, 1)
 			n, err := con.Read(b)
 			if err != nil {
 				t.Logf("unexpected: %v", err)
 				return
 			}
-			fmt.Println("xaz read-" + string(b[:n]))
-			t.Logf("read: %v", string(b[:n]))
+			//t.Logf("read: %v", string(b[:n]))
 			for i := 0; i < n; i++ {
 				if v[j+i] != b[i] {
 					t.Errorf("incorrect values: %v != %v", v[j+i], b[i])
@@ -130,11 +124,12 @@ func TestStart(t *testing.T) {
 			}
 			j = j + n
 			if j == (len(v) - 1) {
+				t.Log("all data read")
 				return
 			}
 		}
 	}()
-	// write
+	// client writer
 	go func() {
 		for _, v := range values {
 			t.Logf("try to write: %v", v)
@@ -143,32 +138,16 @@ func TestStart(t *testing.T) {
 				t.Errorf("write error: %v", err)
 			}
 		}
-
-		fmt.Println("xaz shutdown-1")
+		// wait read all data before shutdown
+		<-readDone
 		if err := p.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown error: %v\n", err)
 		}
-		fmt.Println("xaz shutdown-2")
-		close(doneCh)
+		time.Sleep(1000 * time.Millisecond)
+		close(writeDone)
 	}()
-	//for _, v := range values {
-	//	t.Logf("try to write: %v", v)
-	//	_, err := con.Write([]byte(v))
-	//	if err != nil {
-	//		t.Errorf("write error: %v", err)
-	//	}
-	//}
-	//time.Sleep(1000 * time.Millisecond)
-	//go func() {
-	//	fmt.Println("xaz shutdown-1")
-	//	if err := p.Shutdown(context.Background()); err != nil {
-	//		t.Errorf("shutdown error: %v\n", err)
-	//	}
-	//	fmt.Println("xaz shutdown-2")
-	//	close(doneCh)
-	//}()
 	if err := <-errc; err != nil {
 		t.Error(err)
 	}
-	<-doneCh
+	<-writeDone
 }

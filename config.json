@@ -3,11 +3,13 @@
     {
       "src": {"host": "localhost", "port":  15001},
       "dst": {"host": "localhost", "port":  15002},
+      "buffer": 32,
       "limit": 10
     },
     {
       "src": {"host": "localhost", "port":  15003},
       "dst": {"host": "localhost", "port":  15004},
+      "buffer": 32,
       "limit": 10
     }
   ],

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -40,6 +41,7 @@ type HostCfg struct {
 	Src     NetCfg        `json:"src"`
 	Dst     NetCfg        `json:"dst"`
 	Limit   int64         `json:"limit"`
+	Buffer  int           `json:"buffer"`
 	done    chan struct{} // shutdown
 	counter int64
 }
@@ -92,7 +94,6 @@ func (h *HostCfg) Dial() (*net.TCPConn, error) {
 
 // Run does transmission data between clients.
 func (h *HostCfg) Run(inCon *net.TCPConn) error {
-	const buffer = 32
 	defer func() {
 		if err := inCon.Close(); err != nil {
 			info.Printf("inCon close error: %v\n", err)
@@ -107,24 +108,17 @@ func (h *HostCfg) Run(inCon *net.TCPConn) error {
 			info.Printf("outCon close error: %v\n", err)
 		}
 	}()
-	fromServer, fromClient := make([]byte, buffer), make([]byte, buffer)
+	fromServer, fromClient := make([]byte, h.Buffer), make([]byte, h.Buffer)
 	end := make(chan struct{})
 	// client (incCon) <- proxy <- server (outCon)
-	transmission := func(in, out *net.TCPConn, b []byte, name string) {
+	transmission := func(src, dst *net.TCPConn, b []byte, name string) {
 		defer func() {
 			end <- struct{}{}
 		}()
-		for {
-			n, err := in.Read(b)
-			if err != nil {
-				info.Printf("can't read data %s [%s]: %v", h.Name(), name, err)
-				return
-			}
-			n, err = out.Write(b[:n])
-			if err != nil {
-				info.Printf("can't write data %s [%s]: %v", h.Name(), name, err)
-				return
-			}
+		_, err := io.CopyBuffer(dst, src, b)
+		if err != nil {
+			info.Printf("can't copy data %s [%s]: %v\n", h.Name(), name, err)
+			return
 		}
 	}
 	// server -> client
@@ -143,7 +137,7 @@ func (h *HostCfg) Run(inCon *net.TCPConn) error {
 }
 
 // HandleHost accepts incoming request for new proxy connections.
-func (p *Proxy) HandleHost(i int, done chan int) {
+func (p *Proxy) HandleHost(i int, done chan<- int) {
 	var (
 		wg           sync.WaitGroup
 		reachedLimit bool
@@ -287,6 +281,9 @@ func New(fileName string) (*Proxy, error) {
 	for i := range p.Hosts {
 		if p.Hosts[i].Limit < 1 {
 			return nil, fmt.Errorf("failed limit for host #%v", i)
+		}
+		if p.Hosts[i].Buffer < 1 {
+			return nil, fmt.Errorf("failed buffer value for host #%v", i)
 		}
 	}
 	return p, nil
