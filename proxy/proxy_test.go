@@ -78,7 +78,8 @@ func TestStart(t *testing.T) {
 	serverPort := p.Hosts[0].Dst.Port
 	go func() {
 		if err := echoServer(t, serverPort, echoListener); err != nil {
-			t.Logf("echo server stop: %v\n", err)
+			info.Printf("echo server stop: %v\n", err)
+			//t.Logf("echo server stop: %v\n", err)
 		}
 	}()
 	go func() {
@@ -124,7 +125,7 @@ func TestStart(t *testing.T) {
 			}
 			j = j + n
 			if j == (len(v) - 1) {
-				t.Log("all data read")
+				//t.Log("all data read")
 				return
 			}
 		}
@@ -132,7 +133,7 @@ func TestStart(t *testing.T) {
 	// client writer
 	go func() {
 		for _, v := range values {
-			t.Logf("try to write: %v", v)
+			//t.Logf("try to write: %v", v)
 			_, err := con.Write([]byte(v))
 			if err != nil {
 				t.Errorf("write error: %v", err)
