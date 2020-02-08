@@ -23,6 +23,13 @@ test: lint
 	@-cp config.json $(TESTCFG)
 	go test -race -v -cover -coverprofile=$(COVERAGE) -trace trace.out $(PROXYPKG)
 
+light-test:
+	go vet 121proxy.go
+	go vet $(PROXYPKG)
+	go vet server/server.go
+	@-cp config.json $(TESTCFG)
+	go test -race -v -cover -coverprofile=$(COVERAGE) -trace trace.out $(PROXYPKG)
+
 build: test
 	go build -o $(BINPROXY) -ldflags '-X main.Version=$(TAG) -X main.Revision=git:$(VERSION) -X main.BuildDate=$(TS)' $(TARGET)
 
