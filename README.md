@@ -1,5 +1,6 @@
 # 121proxy
 
+![Go](https://github.com/z0rr0/121proxy/workflows/Go/badge.svg)
 [![GoDoc](https://godoc.org/github.com/z0rr0/121proxy/proxy?status.svg)](https://godoc.org/github.com/z0rr0/121proxy/proxy)
 
 One to one TCP proxy.
