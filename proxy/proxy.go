@@ -52,6 +52,7 @@ type Proxy struct {
 	Monitoring int        `json:"monitoring"`
 	inShutdown int32
 	listeners  []*net.TCPListener
+	mu         sync.Mutex
 }
 
 // Addr returns a network address "host:port".
@@ -185,6 +186,7 @@ func (p *Proxy) Start() error {
 	if p.shuttingDoneCalled() {
 		return ErrClosed
 	}
+	p.mu.Lock() // lock shutdown start (rare race case)
 	n := len(p.Hosts)
 	p.listeners = make([]*net.TCPListener, n)
 	for i, h := range p.Hosts {
@@ -207,6 +209,7 @@ func (p *Proxy) Start() error {
 		defer m.Stop()
 		go p.monitoring(m)
 	}
+	p.mu.Unlock()
 	// wait shutdown closing from all listeners
 	for range done {
 		n--
@@ -238,6 +241,8 @@ func (p *Proxy) shuttingDownFinished() bool {
 // Shutdown gracefully shutdowns handlers.
 func (p *Proxy) Shutdown(ctx context.Context) error {
 	var err error
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	atomic.StoreInt32(&p.inShutdown, 1)
 	for i := range p.Hosts {
 		close(p.Hosts[i].done)
