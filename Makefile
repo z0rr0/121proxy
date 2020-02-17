@@ -30,8 +30,10 @@ light-test:
 	@-cp config.json $(TESTCFG)
 	go test -race -v -cover -coverprofile=$(COVERAGE) -trace trace.out $(PROXYPKG)
 
-build: test
+post-build:
 	go build -o $(BINPROXY) -ldflags '-X main.Version=$(TAG) -X main.Revision=git:$(VERSION) -X main.BuildDate=$(TS)' $(TARGET)
+
+build: test post-build
 
 params:
 	@echo "  >  $(NAME) -TS $(TS) - $(TAG) - $(VERSION)"
